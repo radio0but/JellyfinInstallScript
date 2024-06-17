@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# Create the Jellyfin directory and navigate to it
+sudo mkdir -p /opt/jellyfin
+cd /opt/jellyfin
+
+# Download and extract Jellyfin
+sudo wget https://repo.jellyfin.org/files/server/linux/latest-stable/amd64/jellyfin_10.9.6-amd64.tar.gz
+sudo tar xvzf jellyfin_10.9.6-amd64.tar.gz
+sudo ln -s jellyfin_10.9.6 jellyfin
+
+# Create necessary directories
+sudo mkdir -p data cache config log
+
+# Install Jellyfin FFmpeg
+sudo pacman -S --noconfirm jellyfin-ffmpeg
+
+# Create the Jellyfin start script
+cat << 'EOF' | sudo tee jellyfin.sh
+#!/bin/bash
+JELLYFINDIR="/opt/jellyfin"
+FFMPEGDIR="/usr/share/jellyfin-ffmpeg"
+
+$JELLYFINDIR/jellyfin/jellyfin \
+ -d $JELLYFINDIR/data \
+ -C $JELLYFINDIR/cache \
+ -c $JELLYFINDIR/config \
+ -l $JELLYFINDIR/log \
+ --ffmpeg $FFMPEGDIR/ffmpeg
+EOF
+
+# Make the Jellyfin start script executable
+sudo chmod u+x jellyfin.sh
+
+# Get the current user and group
+CURRENT_USER=$(whoami)
+CURRENT_GROUP=$(id -gn)
+
+# Change ownership of all files and directories to the current user and group
+sudo chown -R $CURRENT_USER:$CURRENT_GROUP *
+
+# Create the systemd service file for Jellyfin
+cat << EOF | sudo tee /etc/systemd/system/jellyfin.service
+[Unit]
+Description=Jellyfin
+After=network.target
+
+[Service]
+Type=simple
+User=$CURRENT_USER
+Restart=always
+ExecStart=/opt/jellyfin/jellyfin.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Apply the correct permissions to the service file
+sudo chmod 644 /etc/systemd/system/jellyfin.service
+
+# Reload systemd to recognize the new service
+sudo systemctl daemon-reload
+
+# Enable the Jellyfin service to start on boot
+sudo systemctl enable jellyfin.service
+
+# Start the Jellyfin service
+sudo systemctl start jellyfin.service
