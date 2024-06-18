@@ -1,21 +1,82 @@
 #!/bin/bash
 
-# Create the Jellyfin directory and navigate to it
+# Vérifie si /opt/jellyfin existe
+if [ -d /opt/jellyfin ]; then
+  echo "/opt/jellyfin existe. Voulez-vous réinstaller Jellyfin ? Cela supprimera toutes les configurations existantes. (oui/non)"
+  read response
+  if [[ "$response" != "oui" ]]; then
+    echo "Arrêt du processus d'installation."
+    exit 0
+  else
+    # Arrête le service Jellyfin s'il existe
+    if systemctl is-active --quiet jellyfin.service; then
+      sudo systemctl stop jellyfin.service
+    fi
+
+    # Supprime le répertoire Jellyfin et le fichier de service systemd
+    sudo rm -rf /opt/jellyfin
+    sudo rm -f /etc/systemd/system/jellyfin.service
+
+    echo "Installation précédente de Jellyfin supprimée."
+  fi
+fi
+
+# Demande l'URL de téléchargement
+echo "Entrez l'URL de téléchargement de Jellyfin (appuyez sur Entrée pour utiliser l'URL par défaut) :"
+read url
+if [ -z "$url" ]; then
+  url="https://repo.jellyfin.org/files/server/linux/latest-stable/amd64/jellyfin_10.9.6-amd64.tar.gz"
+fi
+
+# Crée le répertoire Jellyfin et s'y déplace
 sudo mkdir -p /opt/jellyfin
 cd /opt/jellyfin
 
-# Download and extract Jellyfin
-sudo wget https://repo.jellyfin.org/files/server/linux/latest-stable/amd64/jellyfin_10.9.6-amd64.tar.gz
-sudo tar xvzf jellyfin_10.9.6-amd64.tar.gz
+# Télécharge et extrait Jellyfin
+sudo wget $url
+sudo tar xvzf $(basename $url)
 sudo ln -s jellyfin_10.9.6 jellyfin
 
-# Create necessary directories
+# Crée les répertoires nécessaires
 sudo mkdir -p data cache config log
 
-# Install Jellyfin FFmpeg
-sudo pacman -S --noconfirm jellyfin-ffmpeg
+# Détecte la distribution Linux et installe Jellyfin FFmpeg
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+  case "$ID" in
+    ubuntu|debian)
+      sudo apt update
+      sudo apt install -y jellyfin-ffmpeg
+      ;;
+    fedora)
+      sudo dnf install -y jellyfin-ffmpeg
+      ;;
+    arch|manjaro)
+      sudo pacman -S --noconfirm jellyfin-ffmpeg
+      ;;
+    *)
+      echo "Distribution non supportée pour l'installation automatique de Jellyfin FFmpeg."
+      echo "Veuillez entrer la commande d'installation de jellyfin-ffmpeg pour votre gestionnaire de paquets :"
+      read package_command
+      if [ -z "$package_command" ]; then
+        echo "Avertissement : jellyfin-ffmpeg doit être installé manuellement pour que Jellyfin fonctionne correctement."
+      else
+        sudo $package_command
+      fi
+      ;;
+  esac
+else
+  echo "Impossible de détecter la distribution Linux."
+  echo "Veuillez entrer la commande d'installation de jellyfin-ffmpeg pour votre gestionnaire de paquets :"
+  read package_command
+  if [ -z "$package_command" ]; then
+    echo "Avertissement : jellyfin-ffmpeg doit être installé manuellement pour que Jellyfin fonctionne correctement."
+  else
+    sudo $package_command
+  fi
+fi
 
-# Create the Jellyfin start script
+# Crée le script de démarrage de Jellyfin
 cat << 'EOF' | sudo tee jellyfin.sh
 #!/bin/bash
 JELLYFINDIR="/opt/jellyfin"
@@ -29,17 +90,17 @@ $JELLYFINDIR/jellyfin/jellyfin \
  --ffmpeg $FFMPEGDIR/ffmpeg
 EOF
 
-# Make the Jellyfin start script executable
+# Rend le script de démarrage Jellyfin exécutable
 sudo chmod u+x jellyfin.sh
 
-# Get the current user and group
+# Obtient l'utilisateur et le groupe actuels
 CURRENT_USER=$(whoami)
 CURRENT_GROUP=$(id -gn)
 
-# Change ownership of all files and directories to the current user and group
+# Change le propriétaire de tous les fichiers et répertoires pour l'utilisateur et le groupe actuels
 sudo chown -R $CURRENT_USER:$CURRENT_GROUP *
 
-# Create the systemd service file for Jellyfin
+# Crée le fichier de service systemd pour Jellyfin
 cat << EOF | sudo tee /etc/systemd/system/jellyfin.service
 [Unit]
 Description=Jellyfin
@@ -55,14 +116,17 @@ ExecStart=/opt/jellyfin/jellyfin.sh
 WantedBy=multi-user.target
 EOF
 
-# Apply the correct permissions to the service file
+# Applique les permissions correctes au fichier de service
 sudo chmod 644 /etc/systemd/system/jellyfin.service
 
-# Reload systemd to recognize the new service
+# Recharge systemd pour reconnaître le nouveau service
 sudo systemctl daemon-reload
 
-# Enable the Jellyfin service to start on boot
+# Active le service Jellyfin pour qu'il démarre au boot
 sudo systemctl enable jellyfin.service
 
-# Start the Jellyfin service
+# Démarre le service Jellyfin
 sudo systemctl start jellyfin.service
+
+echo "Installation et configuration de Jellyfin terminées."
+
